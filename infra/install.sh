@@ -40,7 +40,7 @@
 
 set -euo pipefail
 
-main() {
+remote_self_bootstrap() {
 # ───────────────── self-bootstrap (curl|bash mode) ─────────────────
 # When piped from curl, BASH_SOURCE points at /dev/stdin and there are no
 # sibling steps/ or templates/. Install git, clone the repo to the canonical
@@ -151,22 +151,10 @@ if [ -z "$INFRA_DIR_PROBE" ] || [ ! -d "${INFRA_DIR_PROBE}/steps" ]; then
     export FUTRX_INSTALL_CHECKOUT_SELECTED=1
     exec bash "$TARGET/infra/install.sh" "$@"
 fi
+}
 
+remote_parse_install_arguments() {
 # ───────────────── args ─────────────────
-# INFRA_DIR resolves before argument parsing so the shared helpers below
-# (and every validation gate) come from lib/common.sh. The curl|bash
-# bootstrap block above intentionally stays self-contained instead.
-INFRA_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-# shellcheck source=lib/common.sh
-. "$INFRA_DIR/lib/common.sh"
-# shellcheck source=lib/../config/defaults.sh
-. "$INFRA_DIR/config/defaults.sh"
-HOSTNAME=""
-SKIP_DNS_CHECK=0
-GOOGLE_CLIENT_ID=""
-GOOGLE_CLIENT_SECRET=""
-GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-TARGET_REF=""
 for a in "$@"; do
     case "$a" in
         --skip-dns-check)         SKIP_DNS_CHECK=1 ;;
@@ -198,9 +186,24 @@ if printf '%s' "$HOSTNAME" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^\[.*\]$'; 
     echo "  Let's Encrypt cannot issue certs for IPs and your site will lose TLS." >&2
     exit 1
 fi
-require_root "this installer"
+}
 
-export HOSTNAME GITHUB_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET
+remote_load_configuration() {
+HOSTNAME=""
+SKIP_DNS_CHECK=0
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+TARGET_REF=""
+# INFRA_DIR resolves before argument parsing so the shared helpers below
+# (and every validation gate) come from lib/common.sh. The curl|bash
+# bootstrap block above intentionally stays self-contained instead.
+INFRA_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+# shellcheck source=lib/common.sh
+. "$INFRA_DIR/lib/common.sh"
+# shellcheck source=lib/../config/defaults.sh
+. "$INFRA_DIR/config/defaults.sh"
+
 if [ -n "$TARGET_REF" ]; then
     export FUTRX_CHECKOUT_REF="$TARGET_REF"
 fi
@@ -242,7 +245,9 @@ render_template() {
         < "$tmpl" > "$dest"
 }
 export -f render_template
+}
 
+remote_migrate_legacy_install() {
 # ───────────────── pre-rename installation migration ─────────────────
 # shellcheck source=lib/install-migration.sh
 . "$INFRA_DIR/lib/install-migration.sh"
@@ -251,14 +256,18 @@ if [ "$FUTRX_INSTALL_PATH_MIGRATED" -eq 1 ]; then
     INFRA_DIR="$INSTALL_DIR/infra"
     export INFRA_DIR
 fi
+}
 
+remote_select_checkout() {
 # ───────────────── select checkout and re-exec ─────────────────
 # This precedes every version/catalog consumer so direct installer reruns are
 # as commit-consistent as update.sh.
 # shellcheck source=steps/00-checkout.sh
 . "$INFRA_DIR/steps/00-checkout.sh"
 step_00_checkout
+}
 
+remote_validate_host() {
 # ───────────────── optional Google user authentication ─────────────────
 # The administrator always claims the server with a local email/password.
 # Google OAuth is only for invited users and may be configured later in the UI.
@@ -316,7 +325,9 @@ if [ "$SKIP_DNS_CHECK" -eq 0 ]; then
         ok "$HOSTNAME → $SERVER_IP (matches this server)"
     fi
 fi
+}
 
+remote_converge_host() {
 # ───────────────── run the convergence steps ─────────────────
 # shellcheck source=steps/01-host-deps.sh
 . "$INFRA_DIR/steps/01-host-deps.sh"
@@ -339,7 +350,9 @@ step_06_ssh_hardening
 # shellcheck source=steps/07-lxc-ipv4-heal.sh
 . "$INFRA_DIR/steps/07-lxc-ipv4-heal.sh"
 step_07_lxc_ipv4_heal
+}
 
+remote_print_install_summary() {
 # ───────────────── summary ─────────────────
 cat <<EOF
 
@@ -374,6 +387,19 @@ cat <<EOF
 
 EOF
 }
+
+main() {
+    remote_self_bootstrap "$@"
+    remote_load_configuration
+    remote_parse_install_arguments "$@"
+    require_root "this installer"
+    remote_migrate_legacy_install
+    remote_select_checkout
+    remote_validate_host
+    remote_converge_host
+    remote_print_install_summary
+}
+
 
 # Sourced (e.g. by tests) - definitions only. Note the guard
 # defaults to *executing*: BASH_SOURCE is unset when bash reads

@@ -40,13 +40,15 @@ begin_maintenance() {
 end_maintenance() {
     rm -f "$MAINTENANCE_FILE"
 }
-main() {
+remote_load_configuration() {
 INFRA_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 # shellcheck source=lib/common.sh
 . "$INFRA_DIR/lib/common.sh"
 DATA_DIR="${FUTRX_DATA_DIR:-/opt/remote.futrx/data}"
 MAINTENANCE_FILE="${FUTRX_MAINTENANCE_FILE:-$DATA_DIR/self-update/maintenance.json}"
+}
 
+remote_parse_workspace_arguments() {
 DRY_RUN=0
 REBAKE=1
 INCLUDE_BUSY=0
@@ -58,12 +60,17 @@ for a in "$@"; do
         *) err "unknown flag: $a"; exit 1 ;;
     esac
 done
+}
 
-require_root "upgrade-workspaces"
+remote_validate_host() {
+# ───────────────── 0. validate ─────────────────
 if ! command -v lxc >/dev/null; then
     err "lxc CLI not found"
     exit 1
 fi
+}
+
+remote_rebake_base_image() {
 # ───────────────── 1. rebake ─────────────────
 if [ "$REBAKE" -eq 1 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -76,7 +83,9 @@ if [ "$REBAKE" -eq 1 ]; then
 else
     log "Skipping rebake (--no-rebake) — recycling containers onto the existing image"
 fi
+}
 
+remote_migrate_containers() {
 # ───────────────── 2. migrate + replace through Go ─────────────────
 log "Migrating and replacing project containers"
 GO_ARGS=()
@@ -100,6 +109,15 @@ if [ "$DRY_RUN" -eq 0 ]; then
     trap - EXIT
 fi
 ok "workspace lifecycle convergence complete"
+}
+
+main() {
+    remote_load_configuration
+    remote_parse_workspace_arguments "$@"
+    require_root "upgrade-workspaces"
+    remote_validate_host
+    remote_rebake_base_image
+    remote_migrate_containers
 }
 
 # Sourced (e.g. by tests) - definitions only. Note the guard
