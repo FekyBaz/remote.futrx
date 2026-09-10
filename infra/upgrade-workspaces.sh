@@ -27,6 +27,20 @@
 #   --include-busy   also replace containers with an active agent process
 set -euo pipefail
 
+begin_maintenance() {
+    local maintenance_dir temporary
+    maintenance_dir="$(dirname "$MAINTENANCE_FILE")"
+    mkdir -p "$maintenance_dir"
+    chmod 700 "$maintenance_dir"
+    temporary="${MAINTENANCE_FILE}.tmp.$$"
+    printf '{"pid":%d,"startedAt":%d}\n' "$$" "$(date +%s)" > "$temporary"
+    chmod 600 "$temporary"
+    mv "$temporary" "$MAINTENANCE_FILE"
+}
+end_maintenance() {
+    rm -f "$MAINTENANCE_FILE"
+}
+main() {
 INFRA_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 # shellcheck source=lib/common.sh
 . "$INFRA_DIR/lib/common.sh"
@@ -73,19 +87,6 @@ GO_ARGS=()
 # Keep the control plane and update-status polling available throughout the
 # migration. The backend checks this live-PID marker before accepting a new
 # prompt, closing the race that previously required stopping the whole service.
-begin_maintenance() {
-    local maintenance_dir temporary
-    maintenance_dir="$(dirname "$MAINTENANCE_FILE")"
-    mkdir -p "$maintenance_dir"
-    chmod 700 "$maintenance_dir"
-    temporary="${MAINTENANCE_FILE}.tmp.$$"
-    printf '{"pid":%d,"startedAt":%d}\n' "$$" "$(date +%s)" > "$temporary"
-    chmod 600 "$temporary"
-    mv "$temporary" "$MAINTENANCE_FILE"
-}
-end_maintenance() {
-    rm -f "$MAINTENANCE_FILE"
-}
 if [ "$DRY_RUN" -eq 0 ]; then
     begin_maintenance
     trap end_maintenance EXIT
@@ -99,3 +100,12 @@ if [ "$DRY_RUN" -eq 0 ]; then
     trap - EXIT
 fi
 ok "workspace lifecycle convergence complete"
+}
+
+# Sourced (e.g. by tests) - definitions only. Note the guard
+# defaults to *executing*: BASH_SOURCE is unset when bash reads
+# from stdin (`bash -s`), which must still run (curl|bash mode).
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+main "$@"

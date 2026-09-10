@@ -26,13 +26,31 @@
 # Test-only overrides: FUTRX_INSTALL_DIR, FUTRX_SERVICE_NAME, FUTRX_SERVICE_PORT.
 set -euo pipefail
 
-SCRIPT_INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-# shellcheck source=lib/common.sh
-. "$SCRIPT_INFRA_DIR/lib/common.sh"
-
 usage() {
     sed -n '2,/^set -euo pipefail$/ { /^set -euo pipefail$/d; s/^# \{0,1\}//p; }' "$0"
 }
+finish() {
+    local status="$1"
+    trap - EXIT
+    if [ "$DEPLOYMENT_SUCCEEDED" -ne 1 ]; then
+        echo "Application deployment failed; restoring the previous release" >&2
+        git reset --hard "$PREVIOUS_SHA" >/dev/null 2>&1 || true
+        if [ "$BINARY_REPLACED" -eq 1 ]; then
+            install -m 0755 "$PREVIOUS_BINARY" "$BINARY" || true
+            systemctl restart "$SERVICE_NAME" || true
+        fi
+    fi
+    rm -f "$PREVIOUS_BINARY" "$STAGED_BINARY"
+    rmdir "$STAGE_DIR" 2>/dev/null || true
+    exit "$status"
+}
+main() {
+SCRIPT_INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+# shellcheck source=lib/common.sh
+. "$SCRIPT_INFRA_DIR/lib/common.sh"
+# shellcheck source=lib/../config/defaults.sh
+. "$SCRIPT_INFRA_DIR/config/defaults.sh"
+
 
 TARGET_REF=""
 for argument in "$@"; do
@@ -49,10 +67,10 @@ if [ -z "$TARGET_REF" ]; then
     exit 2
 fi
 
-DEFAULT_INSTALL_DIR="${INSTALL_DIR:-/opt/remote.futrx}"
+DEFAULT_INSTALL_DIR="${INSTALL_DIR:-$FUTRX_DEFAULT_INSTALL_DIR}"
 INSTALL_DIR="${FUTRX_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
-SERVICE_NAME="${FUTRX_SERVICE_NAME:-remote.futrx.service}"
-DEFAULT_SERVICE_PORT="${PORT:-7682}"
+SERVICE_NAME="${FUTRX_SERVICE_NAME:-$FUTRX_DEFAULT_SERVICE_NAME}"
+DEFAULT_SERVICE_PORT="${PORT:-$FUTRX_DEFAULT_SERVICE_PORT}"
 SERVICE_PORT="${FUTRX_SERVICE_PORT:-$DEFAULT_SERVICE_PORT}"
 BINARY="$INSTALL_DIR/backend/remote"
 
@@ -113,21 +131,6 @@ cp -p "$BINARY" "$PREVIOUS_BINARY"
 BINARY_REPLACED=0
 DEPLOYMENT_SUCCEEDED=0
 
-finish() {
-    local status="$1"
-    trap - EXIT
-    if [ "$DEPLOYMENT_SUCCEEDED" -ne 1 ]; then
-        echo "Application deployment failed; restoring the previous release" >&2
-        git reset --hard "$PREVIOUS_SHA" >/dev/null 2>&1 || true
-        if [ "$BINARY_REPLACED" -eq 1 ]; then
-            install -m 0755 "$PREVIOUS_BINARY" "$BINARY" || true
-            systemctl restart "$SERVICE_NAME" || true
-        fi
-    fi
-    rm -f "$PREVIOUS_BINARY" "$STAGED_BINARY"
-    rmdir "$STAGE_DIR" 2>/dev/null || true
-    exit "$status"
-}
 trap 'finish $?' EXIT
 
 write_update_progress "application-build" "Building the application update"
@@ -171,3 +174,12 @@ fi
 DEPLOYMENT_SUCCEEDED=1
 echo
 echo "✓ application release $TARGET_REF deployed"
+}
+
+# Sourced (e.g. by tests) - definitions only. Note the guard
+# defaults to *executing*: BASH_SOURCE is unset when bash reads
+# from stdin (`bash -s`), which must still run (curl|bash mode).
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+main "$@"

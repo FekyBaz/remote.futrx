@@ -40,6 +40,7 @@
 
 set -euo pipefail
 
+main() {
 # ───────────────── self-bootstrap (curl|bash mode) ─────────────────
 # When piped from curl, BASH_SOURCE points at /dev/stdin and there are no
 # sibling steps/ or templates/. Install git, clone the repo to the canonical
@@ -158,6 +159,8 @@ fi
 INFRA_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 # shellcheck source=lib/common.sh
 . "$INFRA_DIR/lib/common.sh"
+# shellcheck source=lib/../config/defaults.sh
+. "$INFRA_DIR/config/defaults.sh"
 HOSTNAME=""
 SKIP_DNS_CHECK=0
 GOOGLE_CLIENT_ID=""
@@ -205,10 +208,10 @@ fi
 # ───────────────── globals ─────────────────
 # INFRA_DIR was resolved before argument parsing (see above) so the shared
 # helpers are available to every validation gate.
-INSTALL_DIR="${FUTRX_INSTALL_DIR:-/opt/remote.futrx}"
-LEGACY_INSTALL_DIR="${FUTRX_LEGACY_INSTALL_DIR:-/opt/remote.futrx.dev}"
-REPO_URL="https://github.com/futrx-com/remote.futrx.git"
-SERVICE_PORT="${SERVICE_PORT:-7682}"
+INSTALL_DIR="${FUTRX_INSTALL_DIR:-$FUTRX_DEFAULT_INSTALL_DIR}"
+LEGACY_INSTALL_DIR="${FUTRX_LEGACY_INSTALL_DIR:-$FUTRX_DEFAULT_LEGACY_INSTALL_DIR}"
+REPO_URL="$FUTRX_REPOSITORY_URL"
+SERVICE_PORT="${SERVICE_PORT:-$FUTRX_DEFAULT_SERVICE_PORT}"
 HOST_CLI_PREFIX="$INSTALL_DIR/data/host-clis"
 HOST_CLI_BIN_DIR="$HOST_CLI_PREFIX/bin"
 
@@ -254,6 +257,7 @@ fi
 # as commit-consistent as update.sh.
 # shellcheck source=steps/00-checkout.sh
 . "$INFRA_DIR/steps/00-checkout.sh"
+step_00_checkout
 
 # ───────────────── optional Google user authentication ─────────────────
 # The administrator always claims the server with a local email/password.
@@ -316,18 +320,25 @@ fi
 # ───────────────── run the convergence steps ─────────────────
 # shellcheck source=steps/01-host-deps.sh
 . "$INFRA_DIR/steps/01-host-deps.sh"
+step_01_host_deps
 # shellcheck source=steps/02-app.sh
 . "$INFRA_DIR/steps/02-app.sh"
+step_02_app
 # shellcheck source=steps/03-caddy.sh
 . "$INFRA_DIR/steps/03-caddy.sh"
+step_03_caddy
 # shellcheck source=steps/04-backend-svc.sh
 . "$INFRA_DIR/steps/04-backend-svc.sh"
+step_04_backend_svc
 # shellcheck source=steps/05-base-image.sh
 . "$INFRA_DIR/steps/05-base-image.sh"
+step_05_base_image
 # shellcheck source=steps/06-ssh-hardening.sh
 . "$INFRA_DIR/steps/06-ssh-hardening.sh"
+step_06_ssh_hardening
 # shellcheck source=steps/07-lxc-ipv4-heal.sh
 . "$INFRA_DIR/steps/07-lxc-ipv4-heal.sh"
+step_07_lxc_ipv4_heal
 
 # ───────────────── summary ─────────────────
 cat <<EOF
@@ -362,3 +373,12 @@ cat <<EOF
 ═══════════════════════════════════════════════════════════════
 
 EOF
+}
+
+# Sourced (e.g. by tests) - definitions only. Note the guard
+# defaults to *executing*: BASH_SOURCE is unset when bash reads
+# from stdin (`bash -s`), which must still run (curl|bash mode).
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+main "$@"

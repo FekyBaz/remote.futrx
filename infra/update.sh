@@ -41,14 +41,15 @@
 # FUTRX_SERVICE_UNIT_PATH, and FUTRX_LEGACY_SERVICE_UNIT_PATH.
 set -euo pipefail
 
-INSTALL_DIR="${FUTRX_INSTALL_DIR:-/opt/remote.futrx}"
-LEGACY_INSTALL_DIR="${FUTRX_LEGACY_INSTALL_DIR:-/opt/remote.futrx.dev}"
-UNIT="${FUTRX_SERVICE_UNIT_PATH:-/etc/systemd/system/remote.futrx.service}"
-LEGACY_UNIT="${FUTRX_LEGACY_SERVICE_UNIT_PATH:-/etc/systemd/system/remote.futrx.dev.service}"
-
 usage() {
     sed -n '2,/^set -euo pipefail$/ { /^set -euo pipefail$/d; s/^# \{0,1\}//p; }' "$0"
 }
+main() {
+INSTALL_DIR="${FUTRX_INSTALL_DIR:-$FUTRX_DEFAULT_INSTALL_DIR}"
+LEGACY_INSTALL_DIR="${FUTRX_LEGACY_INSTALL_DIR:-$FUTRX_DEFAULT_LEGACY_INSTALL_DIR}"
+UNIT="${FUTRX_SERVICE_UNIT_PATH:-/etc/systemd/system/remote.futrx.service}"
+LEGACY_UNIT="${FUTRX_LEGACY_SERVICE_UNIT_PATH:-/etc/systemd/system/remote.futrx.dev.service}"
+
 
 HOSTNAME=""
 INCLUDE_BUSY=0
@@ -74,6 +75,8 @@ done
 SCRIPT_INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_INFRA_DIR/lib/common.sh"
+# shellcheck source=lib/../config/defaults.sh
+. "$SCRIPT_INFRA_DIR/config/defaults.sh"
 
 require_root "this updater"
 # shellcheck source=lib/install-migration.sh
@@ -139,3 +142,12 @@ fi
 write_update_progress "finishing" "Finishing the infrastructure update"
 echo
 echo "✓ update complete"
+}
+
+# Sourced (e.g. by tests) - definitions only. Note the guard
+# defaults to *executing*: BASH_SOURCE is unset when bash reads
+# from stdin (`bash -s`), which must still run (curl|bash mode).
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+main "$@"
